@@ -1,0 +1,114 @@
+name: Release binaries
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller -F -c douyin_downloader.py --name DouyinDownloader --collect-submodules yt_dlp --hidden-import requests --hidden-import idna --hidden-import charset_normalizer --hidden-import certifi
+          dir dist
+      - name: Build binary (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          pyinstaller -F -c douyin_downloader.py --name DouyinDownloader --collect-submodules yt_dlp --hidden-import requests --hidden-import idna --hidden-import charset_normalizer --hidden-import certifi
+          ls -al dist
+
+      - name: Rename artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp dist/DouyinDownloader.exe release/DouyinDownloader-windows-amd64.exe
+          else
+            cp dist/DouyinDownloader release/DouyinDownloader-linux-amd64
+            chmod +x release/DouyinDownloader-linux-amd64
+          fi
+
+      - name: Archive zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            7z a -tzip DouyinDownloader-windows-amd64.zip DouyinDownloader-windows-amd64.exe
+          else
+            zip -9 DouyinDownloader-linux-amd64.zip DouyinDownloader-linux-amd64
+          fi
+
+      - name: Archive tar.gz
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            tar -czf DouyinDownloader-windows-amd64.tar.gz DouyinDownloader-windows-amd64.exe
+          else
+            tar -czf DouyinDownloader-linux-amd64.tar.gz DouyinDownloader-linux-amd64
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ runner.os }}-artifacts
+          path: |
+            release/*
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/DouyinDownloader-windows-amd64.zip
+            artifacts/DouyinDownloader-windows-amd64.tar.gz
+            artifacts/DouyinDownloader-windows-amd64.exe
+            artifacts/DouyinDownloader-linux-amd64.zip
+            artifacts/DouyinDownloader-linux-amd64.tar.gz
+            artifacts/DouyinDownloader-linux-amd64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
